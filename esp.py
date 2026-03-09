@@ -86,6 +86,15 @@ class ESPUart:
         Parse a raw wire frame back into a Command.
         Raises ValueError for malformed frames.
         """
+
+        start = command_str.find(COMMAND_PREFIX)
+        end   = command_str.find(COMMAND_TERMINATOR)
+        if start != -1 and end != -1:
+            command_str = command_str[start:end + len(COMMAND_TERMINATOR)]
+
+        if not command_str.startswith(COMMAND_PREFIX) or not command_str.endswith(COMMAND_TERMINATOR):
+            raise ValueError(f"Invalid command frame: {command_str!r}")
+        
         if not command_str.startswith(COMMAND_PREFIX) or \
            not command_str.endswith(COMMAND_TERMINATOR):
             raise ValueError(f"Invalid command frame: {command_str!r}")
