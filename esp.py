@@ -65,6 +65,22 @@ class ESPUart:
             + COMMAND_TERMINATOR
         )
 
+    def send(self, data: str):
+        self.serial.write(data.encode())
+
+    def receive(self) -> str:
+        return self.serial.readline().decode().strip()
+
+    async def async_send(self, data: str):
+        """Non-blocking send – offloads the blocking write to a thread pool."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.send, data)
+
+    async def async_receive(self) -> str:
+        """Non-blocking receive – offloads the blocking readline to a thread pool."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.receive)
+
     def decode_command(self, command_str: str) -> Command:
         """
         Parse a raw wire frame back into a Command.
