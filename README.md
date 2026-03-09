@@ -8,13 +8,13 @@ A FastAPI-based web interface for the Coop Security & Monitoring System (CSMS). 
 - **Log Management** – Retrieve, stream, and convert binary logs to readable formats (CSV, JSON)
 - **Hardware Integration** – Async UART communication with ESP32 at 115200 baud
 - **ESP-NOW Support** – Interfaces with ESP32 mesh network connected to security nodes
-- **Static Web Server** – Serves a Vue.js-based SPA frontend with compiled CSS/JS
+- **Static Web Server** – Serves a Svelte-based SPA frontend with compiled CSS/JS
 - **Type-Safe API** – Pydantic models for request/response validation
 
 ## Tech Stack
 
 **Backend:** Python 3.14+, FastAPI, PySerial (async)
-**Frontend:** Vue.js, Vite, Tailwind CSS
+**Frontend:** Svelte, Flowbite Svelte (built assets served from this backend)
 **Hardware:** ESP32 (UART gateway), Raspberry Pi (server), Security nodes (ESP-NOW mesh)
 **Package Manager:** UV
 
@@ -72,8 +72,10 @@ The API will be available at `http://localhost:8000` with interactive docs at `/
 ├── pyproject.toml       # Project metadata and dependencies
 ├── util/
 │   └── log_conv.py      # Binary log converter (CLI + module)
-└── www/                 # Static frontend assets
+└── www/                 # Static frontend assets (compiled build output)
 ```
+
+> **Note:** The `www/` directory contains the built/compiled frontend assets. The actual frontend source code (Svelte + Flowbite Svelte) is maintained in a separate repository and must be compiled separately before being placed here.
 
 ## Communication Architecture
 
