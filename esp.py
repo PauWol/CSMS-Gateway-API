@@ -165,11 +165,16 @@ class ESPUart:
         Quick liveness probe.  The remote MCU should reply with a frame whose
         parameters contain  {'status': 'ok'}  on success.
         """
-        params = await self._request(
-            Command(command=CMD_PING, parameters={}),
-            timeout=timeout,
-        )
-        return PingResponse(**params)
+        try:
+            params = await self._request(
+                Command(command=CMD_PING, parameters={}),
+                timeout=timeout,
+            )
+            return PingResponse(status=params.get("status", "error"))
+        except asyncio.TimeoutError:
+            return PingResponse(status="unconnected")
+        except (ValueError, KeyError):
+            return PingResponse(status="error")
 
     async def status(self, timeout: float = DEFAULT_TIMEOUT) -> StatusResponse:
         """
