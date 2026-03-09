@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#esp_uart.init()  # open serial port on startup
+esp_uart.init()  # open serial port on startup
 
 @app.get("/api/ping")
 async def ping() -> PingResponse:
