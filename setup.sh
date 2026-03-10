@@ -49,6 +49,28 @@ else
     error "No pyproject.toml or requirements.txt found – cannot install dependencies"
 fi
 
+
+# NetworkManager polkit rule (allows pi user to manage networking without sudo)
+info "Setting up NetworkManager permissions..."
+POLKIT_DIR="/etc/polkit-1/localauthority/50-local.d"
+POLKIT_FILE="$POLKIT_DIR/networkmanager.pkla"
+if [ -f "$POLKIT_FILE" ]; then
+    warn "NetworkManager polkit rule already exists – skipping"
+else
+    sudo mkdir -p "$POLKIT_DIR"
+    sudo tee "$POLKIT_FILE" > /dev/null <<EOF
+[Allow pi user to manage NetworkManager]
+Identity=unix-user:pi
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+EOF
+    sudo systemctl restart polkit
+    info "NetworkManager permissions configured"
+fi
+
+
 # ask about port 80 setup
 echo ""
 read -p "Do you want to serve the app on port 80? (y/n) " -n 1 -r
