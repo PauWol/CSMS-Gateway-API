@@ -1,0 +1,9 @@
+# Add/remove networks freely. Priority = order in list (top = highest).
+networks:
+  - ssid: ""
+    password: ""
+
+ap:
+  ssid: "Gateway-AP"
+  password: ""   # min 8 chars for WPA2
+  ip: "192.168.4.1"          # AP gateway IP

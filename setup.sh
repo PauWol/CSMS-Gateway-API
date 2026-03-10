@@ -49,10 +49,48 @@ else
     error "No pyproject.toml or requirements.txt found – cannot install dependencies"
 fi
 
-# final instructions
+# ask about port 80 setup
 echo ""
-info "Setup complete. Activate the environment and start the server:"
+read -p "Do you want to serve the app on port 80? (y/n) " -n 1 -r
 echo ""
-echo "    source .venv/bin/activate"
-echo "    python start.py"
-echo ""
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    info "Setting up port 80 serving..."
+
+    # Get Python executable path
+    python_path=$(which python3)
+    info "Using Python: $python_path"
+
+    # Set setcap capability to allow binding to port 80
+    info "Setting CAP_NET_BIND_SERVICE capability (this requires sudo)..."
+    sudo setcap cap_net_bind_service=+ep "$python_path" \
+        || error "Failed to set capability. Check your sudo permissions."
+    info "Capability set successfully"
+
+    # Update .env file
+    ENV_FILE=".env"
+    if [ -f "$ENV_FILE" ]; then
+        # Remove existing PORT line if it exists
+        grep -v "^PORT=" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
+    fi
+
+    # Add PORT=80 to .env
+    echo "PORT=80" >> "$ENV_FILE"
+    info ".env updated with PORT=80"
+
+    echo ""
+    info "Port 80 setup complete! You can now start the server without sudo:"
+    echo ""
+    echo "    source .venv/bin/activate"
+    echo "    uv run start.py"
+    echo ""
+    info "The app will be served on http://localhost"
+else
+    echo ""
+    info "Setup complete. Activate the environment and start the server:"
+    echo ""
+    echo "    source .venv/bin/activate"
+    echo "    uv run start.py"
+    echo ""
+    info "The app will be served on http://localhost:8000"
+fi
