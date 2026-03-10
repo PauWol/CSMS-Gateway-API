@@ -58,12 +58,12 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     info "Setting up port 80 serving..."
 
     # Get Python executable path
-    python_path=$(which python3)
-    info "Using Python: $python_path"
+    REAL_PYTHON=$(readlink -f /usr/bin/python3)
+    info "Using Python: $REAL_PYTHON"
 
     # Set setcap capability to allow binding to port 80
     info "Setting CAP_NET_BIND_SERVICE capability (this requires sudo)..."
-    sudo setcap cap_net_bind_service=+ep "$python_path" \
+    sudo setcap cap_net_bind_service=+ep "$REAL_PYTHON" \
         || error "Failed to set capability. Check your sudo permissions."
     info "Capability set successfully"
 
