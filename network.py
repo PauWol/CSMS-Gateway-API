@@ -10,7 +10,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/var/log/wifi_manager.log"),
+        logging.FileHandler(Path(__file__).parent / "wifi_manager.log"),
     ],
 )
 log = logging.getLogger(__name__)
