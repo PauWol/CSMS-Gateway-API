@@ -5,5 +5,5 @@ networks:
 
 ap:
   ssid: "Gateway-AP"
-  password: ""   # min 8 chars for WPA2
+  password: "12345678"   # min 8 chars for WPA2
   ip: "192.168.4.1"          # AP gateway IP
