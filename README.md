@@ -25,7 +25,7 @@ A FastAPI-based web interface for the Coop Security & Monitoring System (CSMS). 
 Run the setup script to automatically install and configure everything:
 
 ```bash
-chmod +x setup.sh && ./setup.sh
+sudo chmod +x setup.sh && ./setup.sh
 ```
 
 This script handles dependency installation, environment configuration, and initial setup.
