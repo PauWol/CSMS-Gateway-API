@@ -49,9 +49,9 @@ if [ ! -f "$SCRIPT_DIR/network.py" ]; then
   error "network.py not found in $SCRIPT_DIR"
 fi
 
-# ── Launch network.py inside the local venv via uv
+# ✅ Run network.py as a subprocess — waits for it to finish, then continues
 info "Launching network.py with uv..."
-exec "$UV_BIN" run --python "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/network.py"
+"$UV_BIN" run --python "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/network.py"
 
 info "Launching start.py with uv..."
 exec "$UV_BIN" run --python "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/start.py"
