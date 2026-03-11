@@ -4,10 +4,6 @@ import sys
 import logging
 from dotenv import load_dotenv
 
-import network  # our WiFi manager module
-
-network.main()  # handle WiFi connection before starting API server
-
 load_dotenv()
 
 logging.basicConfig(

@@ -44,6 +44,14 @@ if [ ! -f "$SCRIPT_DIR/start.py" ]; then
   error "start.py not found in $SCRIPT_DIR"
 fi
 
-# ── Launch start.py inside the local venv via uv
+# ── Confirm network.py exists
+if [ ! -f "$SCRIPT_DIR/network.py" ]; then
+  error "network.py not found in $SCRIPT_DIR"
+fi
+
+# ── Launch network.py inside the local venv via uv
+info "Launching network.py with uv..."
+exec "$UV_BIN" run --python "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/network.py"
+
 info "Launching start.py with uv..."
 exec "$UV_BIN" run --python "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/start.py"
