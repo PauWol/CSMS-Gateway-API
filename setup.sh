@@ -75,12 +75,17 @@ info "Capability set successfully"
 # Update .env file
 ENV_FILE=".env"
 if [ -f "$ENV_FILE" ]; then
-# Remove existing PORT line if it exists
-grep -v "^PORT=" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
+    grep -v "^PORT=" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
 fi
-# Add PORT=80 to .env
 echo "PORT=80" >> "$ENV_FILE"
 info ".env updated with PORT=80"
+
+# ── NEW: set capability on the venv python too ──
+VENV_PYTHON=$(readlink -f "$VENV_DIR/bin/python")
+info "Setting CAP_NET_BIND_SERVICE on venv Python: $VENV_PYTHON"
+sudo setcap cap_net_bind_service=+ep "$VENV_PYTHON" \
+    || error "Failed to set capability on venv Python."
+info "Capability set on venv Python"
 echo ""
 info "Port 80 setup complete! You can now start the server without sudo:"
 echo ""
