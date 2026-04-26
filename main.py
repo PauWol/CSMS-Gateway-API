@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,12 +11,24 @@ from esp import ESPUart
 
 load_dotenv()
 
-app = FastAPI()
 esp_uart = ESPUart(
     port=os.getenv("RPI_PORT"),
     baudrate=int(os.getenv("ESP_BAUDRATE")),
     timeout=int(os.getenv("ESP_TIMEOUT"))
 )
+
+
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        esp_uart.init()
+    except Exception as e:
+        print(f"[startup] Serial init failed: {e}")
+        # app still starts — uart_ping will return 'error' to the frontend
+    yield
+    esp_uart.close()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +38,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-esp_uart.init()  # open serial port on startup
 
 @app.get("/api/uart-ping")
 async def uart_ping() -> UartPingResponse:

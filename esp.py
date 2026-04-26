@@ -6,6 +6,7 @@ from models import (
     StatusResponse,
     SensorResponse,
     LogInfoResponse,
+    UartPingResponse,
 )
 
 # Command frame format:
