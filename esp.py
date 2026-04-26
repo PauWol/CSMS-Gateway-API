@@ -110,7 +110,7 @@ class ESPUart:
 
         command_name   = parts[0]
         parameters_str = parts[1]
-        parameters     = self._safe_dict_eval(parameters_str)
+        parameters     = json.loads(parameters_str)
         return Command(command=command_name, parameters=parameters)
 
     @staticmethod
