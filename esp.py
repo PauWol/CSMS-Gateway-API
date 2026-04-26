@@ -1,4 +1,6 @@
 import asyncio
+import json
+
 from serial import Serial
 from models import (
     Command,
@@ -55,16 +57,13 @@ class ESPUart:
         if self.serial and self.serial.is_open:
             self.serial.close()
 
-    def encode_command(self, cmd: Command) -> str:
-        """
-        Serialise a Command to a wire frame.
-        e.g.  cmd:STS;{'key':'val'}:end
-        """
+    @staticmethod
+    def encode_command(cmd: Command) -> str:
         return (
             COMMAND_PREFIX
             + cmd.command
             + COMMAND_DELIMITER
-            + str(cmd.parameters)
+            + json.dumps(cmd.parameters)
             + COMMAND_TERMINATOR
         )
 
@@ -114,7 +113,8 @@ class ESPUart:
         parameters     = self._safe_dict_eval(parameters_str)
         return Command(command=command_name, parameters=parameters)
 
-    def _safe_dict_eval(self, dict_str: str) -> dict:
+    @staticmethod
+    def _safe_dict_eval(dict_str: str) -> dict:
         """
         Parse a simple stringified dict without using eval().
         Supports only string keys and string values.
