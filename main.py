@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 import os
 
-from models import PingResponse, StatusResponse, SensorResponse, LogInfoResponse
+from models import UartPingResponse, PingResponse, StatusResponse, SensorResponse, LogInfoResponse
 from esp import ESPUart
 
 load_dotenv()
@@ -26,6 +26,10 @@ app.add_middleware(
 )
 
 esp_uart.init()  # open serial port on startup
+
+@app.get("/api/uart-ping")
+async def uart_ping() -> UartPingResponse:
+    return await esp_uart.uart_ping()
 
 @app.get("/api/ping")
 async def ping() -> PingResponse:

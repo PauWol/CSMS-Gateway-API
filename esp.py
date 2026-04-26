@@ -14,6 +14,8 @@ COMMAND_DELIMITER  = ";"
 COMMAND_TERMINATOR = ":end"
 
 # Command names:
+CMD_UART_ACK = "UAK"  # UART physical-layer ack check
+
 CMD_PING         = "PNG"   # Liveness check
 CMD_STATUS       = "STS"   # General status report
 CMD_SENSORS      = "SNS"   # Read all sensor values
@@ -157,6 +159,32 @@ class ESPUart:
         raw = await asyncio.wait_for(self.async_receive(), timeout=timeout)
         response = self.decode_command(raw)
         return response.parameters
+
+    async def uart_ping(self, timeout: float = DEFAULT_TIMEOUT) -> UartPingResponse:
+        """
+        Two-stage UART health check:
+          1. Is the serial port open?          (software layer)
+          2. Does the peer ACK a UAK frame?    (physical/wiring layer)
+
+          'ok'          – port open AND peer responded
+          'unconnected' – port open but peer didn't respond (wrong wiring, dead device)
+          'error'       – port not open or never initialised
+        """
+        if self.serial is None or not self.serial.is_open:
+            return UartPingResponse(status="error")
+
+        try:
+            params = await self._request(
+                Command(command=CMD_UART_ACK, parameters={}),
+                timeout=timeout,
+            )
+            if params.get("status") == "ok":
+                return UartPingResponse(status="ok")
+            return UartPingResponse(status="error")
+        except asyncio.TimeoutError:
+            return UartPingResponse(status="unconnected")
+        except ValueError, KeyError:
+            return UartPingResponse(status="error")
 
     async def ping(self, timeout: float = DEFAULT_TIMEOUT) -> PingResponse:
         """

@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import Literal
 
+class UartPingResponse(BaseModel):
+    status: Literal["ok","error","unconnected"]
 
 class StatusResponse(BaseModel):
     nextWake: int
