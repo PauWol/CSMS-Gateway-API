@@ -189,7 +189,7 @@ class ESPUart:
         v_t = 0.0
         tte = 0
         if self._volt:
-            v_t = self._volt
+            v_t = self._volt["value"]
 
         if self._tte_s:
             tte = self._tte_s
@@ -204,7 +204,6 @@ class ESPUart:
             tte_s=tte,
         )
 
-
     def sensors(self) -> list[SensorResponse]:
         r = []
 
@@ -212,7 +211,7 @@ class ESPUart:
         if pir:
             r.append(
                 SensorResponse(
-                    name="Pir Motion", value=pir["value"], timestamp=pir["ts"]
+                    name="Pir Motion", value=str(pir["value"]), timestamp=pir["ts"]
                 )
             )
 
@@ -220,7 +219,9 @@ class ESPUart:
         if phc:
             r.append(
                 SensorResponse(
-                    name="Photo Resistor", value=phc["value"], timestamp=phc["ts"]
+                    name="Photo Resistor",
+                    value=f"{phc['value']:.4f}",
+                    timestamp=phc["ts"],
                 )
             )
 
@@ -280,6 +281,22 @@ class ESPUart:
             value = value.strip().strip("'\"")
             out[key] = value
         return out
+
+    async def background_reader(self):
+        """Continuously drain the serial port and update sensor state."""
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                raw = await loop.run_in_executor(None, self.serial.readline)
+                if raw:
+                    # Binary sensor frames don't start with "cmd:" — route accordingly
+                    if raw.startswith(COMMAND_PREFIX.encode()):
+                        pass  # command/response traffic, ignore here
+                    else:
+                        self.handle_data(raw)
+            except Exception as e:
+                print(f"[ESPUart] reader error: {e}")
+            await asyncio.sleep(0)
 
     async def async_send_command(self, cmd: Command):
         await self.async_send(self.encode_command(cmd))

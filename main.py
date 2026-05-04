@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -28,10 +29,13 @@ esp_uart = ESPUart(
 async def lifespan(app):
     try:
         esp_uart.init()
+        reader_task = asyncio.create_task(esp_uart.background_reader())
     except Exception as e:
         print(f"[startup] Serial init failed: {e}")
-        # app still starts — uart_ping will return 'error' to the frontend
+        reader_task = None
     yield
+    if reader_task:
+        reader_task.cancel()
     esp_uart.close()
 
 
