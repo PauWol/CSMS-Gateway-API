@@ -1,14 +1,19 @@
 from pydantic import BaseModel
 from typing import Literal
 
+
 class UartPingResponse(BaseModel):
-    status: Literal["ok","error","unconnected"]
+    status: Literal["ok", "error", "unconnected"]
+
 
 class StatusResponse(BaseModel):
-    nextWake: int
     sleepInterval: int
     lastSync: int
-    threatScore: int
+    threatScore: float
+    threshold: float
+    phase: Literal["DAY", "DUSK", "NIGHT"]
+    volt: float
+    tte_s: int
 
 
 class SensorResponse(BaseModel):
@@ -36,4 +41,3 @@ class Command(BaseModel):
 
     def __repr__(self):
         return self.__str__()
-    

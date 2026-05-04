@@ -6,7 +6,13 @@ from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 import os
 
-from models import UartPingResponse, PingResponse, StatusResponse, SensorResponse, LogInfoResponse
+from models import (
+    UartPingResponse,
+    PingResponse,
+    StatusResponse,
+    SensorResponse,
+    LogInfoResponse,
+)
 from esp import ESPUart
 
 load_dotenv()
@@ -14,7 +20,7 @@ load_dotenv()
 esp_uart = ESPUart(
     port=os.getenv("RPI_PORT"),
     baudrate=int(os.getenv("ESP_BAUDRATE")),
-    timeout=int(os.getenv("ESP_TIMEOUT"))
+    timeout=int(os.getenv("ESP_TIMEOUT")),
 )
 
 
@@ -27,6 +33,7 @@ async def lifespan(app):
         # app still starts — uart_ping will return 'error' to the frontend
     yield
     esp_uart.close()
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -43,30 +50,35 @@ app.add_middleware(
 async def uart_ping() -> UartPingResponse:
     return await esp_uart.uart_ping()
 
+
 @app.get("/api/ping")
 async def ping() -> PingResponse:
     return await esp_uart.ping()
 
+
 @app.get("/api/status")
-async def status() -> StatusResponse:
-    return await esp_uart.status()
+def status() -> StatusResponse:
+    return esp_uart.status()
+
 
 @app.get("/api/sensors")
-async def sensor() -> SensorResponse:
-    return await esp_uart.sensors()
+def sensor() -> list[SensorResponse]:
+    return esp_uart.sensors()
+
 
 @app.get("/api/log-info")
 async def log_info() -> LogInfoResponse:
     return await esp_uart.log_info()
 
+
 @app.get("/api/log-download/{log_id}")
 async def log_download(log_id: int):
-    return await esp_uart.log_download(log_id)  
-
+    return await esp_uart.log_download(log_id)
 
 
 # serve static assets
 app.mount("/assets", StaticFiles(directory="www/assets"), name="assets")
+
 
 # serve SPA index
 @app.get("/")
