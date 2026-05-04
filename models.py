@@ -11,7 +11,7 @@ class StatusResponse(BaseModel):
     lastSync: int
     threatScore: float
     threshold: float
-    phase: Literal["DAY", "DUSK", "NIGHT"]
+    phase: Literal["DAY", "DUSK", "NIGHT", "UNKNOWN"]
     volt: float
     tte_s: int
 
