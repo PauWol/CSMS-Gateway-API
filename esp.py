@@ -3,7 +3,7 @@ import json
 import struct
 import time
 
-from serial import Serial
+from serial import Serial, SerialException
 from models import (
     Command,
     PingResponse,
@@ -42,11 +42,43 @@ PKT_VERSION = 1
 # constants at top (same as sender)
 _PHASE_DEC = {0: "DAY", 1: "DUSK", 2: "NIGHT"}
 
+# Minimum header size: version(1) + flags(1) + base_ts(4) = 6 bytes
+_MIN_HEADER = 6
 
-def unpack(buf):
+# Pre-computed minimum payload sizes per flag (bytes consumed after the header)
+_FLAG_SIZES = {
+    FLAG_PIR: 3,  # B + H
+    FLAG_PHC: 4,  # H + H
+    FLAG_RADAR: 6,  # H + H + H
+    FLAG_THREAT: 9,  # f + f + B
+    FLAG_SLEEP: 4,  # L
+    FLAG_VOLT: 4,  # H + H
+    FLAG_TTE: 4,  # L
+}
+
+
+def _required_size(flags: int) -> int:
+    """Return the minimum buffer length needed to safely unpack *flags*."""
+    return _MIN_HEADER + sum(size for flag, size in _FLAG_SIZES.items() if flags & flag)
+
+
+def unpack(buf: bytes | bytearray) -> dict:
     """Gateway-side unpack. Returns a dict of present fields."""
+    if len(buf) < _MIN_HEADER:
+        raise ValueError(
+            f"Buffer too short for header: need {_MIN_HEADER}, got {len(buf)}"
+        )
+
     version, flags, base_ts = struct.unpack_from(">BBL", buf, 0)
     offset = 6
+
+    required = _required_size(flags)
+    if len(buf) < required:
+        raise ValueError(
+            f"Buffer too short for declared flags 0x{flags:02x}: "
+            f"need {required}, got {len(buf)}"
+        )
+
     out = {"version": version, "flags": flags, "base_ts": base_ts}
 
     if flags & FLAG_PIR:
@@ -110,10 +142,17 @@ class ESPUart:
         self._tte_s = None
         self.last_sync = 0
 
+        # FIX 4: single lock so background_reader and _request never call
+        # readline() at the same time (prevents the background reader from
+        # consuming an ACK frame that _request is waiting for).
+        self._read_lock: asyncio.Lock | None = None
+
     def init(self):
         """Open the serial port. Call once before anything else."""
         try:
             self.serial = Serial(self.port, self.baudrate, timeout=self.timeout)
+            # Lock must be created inside the running event-loop.
+            self._read_lock = asyncio.Lock()
         except Exception as e:
             print(f"[ESPUart] Error initializing serial connection: {e}")
             raise
@@ -150,9 +189,11 @@ class ESPUart:
         await loop.run_in_executor(None, self.send, data)
 
     async def async_receive(self) -> bytes:
-        """Non-blocking receive – offloads the blocking readline to a thread pool."""
+        """Non-blocking receive – offloads the blocking readline to a thread pool.
+        Acquires the read lock so it never races with background_reader."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.receive)
+        async with self._read_lock:
+            return await loop.run_in_executor(None, self.receive)
 
     def handle_data(self, data: bytearray | bytes):
         parsed = unpack(data)
@@ -287,15 +328,20 @@ class ESPUart:
         loop = asyncio.get_event_loop()
         while True:
             try:
-                raw = await loop.run_in_executor(None, self.serial.readline)
+                async with self._read_lock:
+                    raw = await loop.run_in_executor(None, self.serial.readline)
                 if raw:
                     # Binary sensor frames don't start with "cmd:" — route accordingly
                     if raw.startswith(COMMAND_PREFIX.encode()):
                         pass  # command/response traffic, ignore here
                     else:
                         self.handle_data(raw)
-            except Exception as e:
+            except (ValueError, SerialException) as e:
+                # FIX 3 / FIX 1: ValueError from unpack is already descriptive;
+                # SerialException means the device went away transiently.
                 print(f"[ESPUart] reader error: {e}")
+            except Exception as e:
+                print(f"[ESPUart] reader unexpected error: {e}")
             await asyncio.sleep(0)
 
     async def async_send_command(self, cmd: Command):
@@ -349,7 +395,7 @@ class ESPUart:
             return UartPingResponse(status="error")
         except asyncio.TimeoutError:
             return UartPingResponse(status="unconnected")
-        except ValueError, KeyError:
+        except ValueError, KeyError, SerialException:  # FIX 1 + FIX 2
             return UartPingResponse(status="error")
 
     async def ping(self, timeout: float = DEFAULT_TIMEOUT) -> PingResponse:
@@ -367,7 +413,7 @@ class ESPUart:
             return PingResponse(status=params.get("status", "error"))
         except asyncio.TimeoutError:
             return PingResponse(status="unconnected")
-        except ValueError, KeyError:
+        except ValueError, KeyError, SerialException:  # FIX 1 + FIX 2
             return PingResponse(status="error")
 
     async def log_info(self, timeout: float = DEFAULT_TIMEOUT) -> LogInfoResponse:
