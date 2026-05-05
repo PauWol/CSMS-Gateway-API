@@ -20,7 +20,6 @@ COMMAND_TERMINATOR = ":end"
 
 # Command names:
 CMD_UART_ACK = "UAK"  # UART physical-layer ack check
-
 CMD_PING = "PNG"  # Liveness check
 CMD_STATUS = "STS"  # General status report
 CMD_SENSORS = "SNS"  # Read all sensor values
@@ -39,21 +38,20 @@ FLAG_VOLT = 0x20
 FLAG_TTE = 0x40
 
 PKT_VERSION = 1
-# constants at top (same as sender)
 _PHASE_DEC = {0: "DAY", 1: "DUSK", 2: "NIGHT"}
 
 # Minimum header size: version(1) + flags(1) + base_ts(4) = 6 bytes
 _MIN_HEADER = 6
 
-# Pre-computed minimum payload sizes per flag (bytes consumed after the header)
+# Bytes consumed after the header for each flag
 _FLAG_SIZES = {
-    FLAG_PIR: 3,  # B + H
-    FLAG_PHC: 4,  # H + H
+    FLAG_PIR: 3,    # B + H
+    FLAG_PHC: 4,    # H + H
     FLAG_RADAR: 6,  # H + H + H
-    FLAG_THREAT: 9,  # f + f + B
+    FLAG_THREAT: 9, # f + f + B
     FLAG_SLEEP: 4,  # L
-    FLAG_VOLT: 4,  # H + H
-    FLAG_TTE: 4,  # L
+    FLAG_VOLT: 4,   # H + H
+    FLAG_TTE: 4,    # L
 }
 
 
@@ -125,6 +123,17 @@ def unpack(buf: bytes | bytearray) -> dict:
 class ESPUart:
     """
     Async-capable UART wrapper for ESP32 peer-to-peer communication.
+
+    Architecture
+    ────────────
+    background_reader() is the *sole* consumer of the serial port. Every
+    incoming byte flows through it:
+
+      • Binary sensor frames   → handle_data()   (updates in-memory state)
+      • Command/response frames → _cmd_queue     (consumed by _request / log_download)
+
+    This eliminates the race where background_reader would previously swallow
+    a command response that _request was waiting for (the old `pass` branch).
     """
 
     def __init__(self, port: str, baudrate: int = 115200, timeout: int = 1):
@@ -140,19 +149,17 @@ class ESPUart:
         self._sleep_ms = None
         self._volt = None
         self._tte_s = None
-        self.last_sync = 0
+        self.last_sync: int = 0
 
-        # FIX 4: single lock so background_reader and _request never call
-        # readline() at the same time (prevents the background reader from
-        # consuming an ACK frame that _request is waiting for).
-        self._read_lock: asyncio.Lock | None = None
+        # Command responses are delivered here by background_reader.
+        # _request and log_download read from this queue.
+        self._cmd_queue: asyncio.Queue | None = None
 
     def init(self):
-        """Open the serial port. Call once before anything else."""
+        """Open the serial port and create the response queue. Call once at startup."""
         try:
             self.serial = Serial(self.port, self.baudrate, timeout=self.timeout)
-            # Lock must be created inside the running event-loop.
-            self._read_lock = asyncio.Lock()
+            self._cmd_queue = asyncio.Queue()
         except Exception as e:
             print(f"[ESPUart] Error initializing serial connection: {e}")
             raise
@@ -167,6 +174,8 @@ class ESPUart:
         if self.serial and self.serial.is_open:
             self.serial.close()
 
+    # ── Encoding ──────────────────────────────────────────────────────────────
+
     @staticmethod
     def encode_command(cmd: Command) -> str:
         return (
@@ -177,25 +186,48 @@ class ESPUart:
             + COMMAND_TERMINATOR
         )
 
-    def send(self, data: str):
-        self.serial.write(data.encode())
+    @staticmethod
+    def decode_command(command: bytes) -> Command:
+        """
+        Parse a raw command/response frame into a Command.
+        Raises ValueError for any frame that is not a well-formed command frame.
+        Binary sensor frames must NOT be passed here – they belong in handle_data().
+        """
+        command_str = command.decode().strip()
 
-    def receive(self) -> bytes:
-        return self.serial.readline()
+        if not command_str.startswith(COMMAND_PREFIX) or not command_str.endswith(
+            COMMAND_TERMINATOR
+        ):
+            raise ValueError(f"Not a command frame: {command_str!r}")
+
+        body = command_str[len(COMMAND_PREFIX) : -len(COMMAND_TERMINATOR)]
+        # Split on the *first* delimiter only – JSON values may contain COMMAND_DELIMITER
+        parts = body.split(COMMAND_DELIMITER, 1)
+
+        if len(parts) == 1:
+            return Command(command=parts[0], parameters={})
+
+        command_name = parts[0]
+        parameters = json.loads(parts[1])
+        return Command(command=command_name, parameters=parameters)
+
+    # ── I/O helpers ───────────────────────────────────────────────────────────
+
+    def _sync_send(self, data: str):
+        self.serial.write(data.encode())
 
     async def async_send(self, data: str):
         """Non-blocking send – offloads the blocking write to a thread pool."""
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.send, data)
+        await loop.run_in_executor(None, self._sync_send, data)
 
-    async def async_receive(self) -> bytes:
-        """Non-blocking receive – offloads the blocking readline to a thread pool.
-        Acquires the read lock so it never races with background_reader."""
-        loop = asyncio.get_event_loop()
-        async with self._read_lock:
-            return await loop.run_in_executor(None, self.receive)
+    async def async_send_command(self, cmd: Command):
+        await self.async_send(self.encode_command(cmd))
+
+    # ── Sensor state ──────────────────────────────────────────────────────────
 
     def handle_data(self, data: bytearray | bytes):
+        """Unpack a binary sensor frame and update in-memory state."""
         parsed = unpack(data)
 
         if "pir" in parsed:
@@ -206,7 +238,7 @@ class ESPUart:
             self._radar = parsed["radar"]
         if "threat" in parsed:
             self._threat = parsed["threat"]
-            self.last_sync = time.time()
+            self.last_sync = int(time.time())
         if "sleep_ms" in parsed:
             self._sleep_ms = parsed["sleep_ms"]
         if "volt" in parsed:
@@ -216,24 +248,17 @@ class ESPUart:
 
     def status(self) -> StatusResponse:
         s_i = self._sleep_ms if self._sleep_ms else 0
-        t_s = 0
-        t_h = 0
+        t_s = 0.0
+        t_h = 0.0
         p_h = "UNKNOWN"
 
-        _th = self._threat
+        if self._threat:
+            t_s = self._threat["score"]
+            t_h = self._threat["threshold"]
+            p_h = self._threat["phase"]
 
-        if _th:
-            t_s = _th["score"]
-            t_h = _th["threshold"]
-            p_h = _th["phase"]
-
-        v_t = 0.0
-        tte = 0
-        if self._volt:
-            v_t = self._volt["value"]
-
-        if self._tte_s:
-            tte = self._tte_s
+        v_t = self._volt["value"] if self._volt else 0.0
+        tte = self._tte_s if self._tte_s else 0
 
         return StatusResponse(
             sleepInterval=s_i,
@@ -248,115 +273,57 @@ class ESPUart:
     def sensors(self) -> list[SensorResponse]:
         r = []
 
-        pir = self._pir
-        if pir:
-            r.append(
-                SensorResponse(
-                    name="Pir Motion", value=str(pir["value"]), timestamp=pir["ts"]
-                )
-            )
+        if self._pir:
+            r.append(SensorResponse(
+                name="Pir Motion",
+                value=str(self._pir["value"]),
+                timestamp=self._pir["ts"],
+            ))
 
-        phc = self._phc
-        if phc:
-            r.append(
-                SensorResponse(
-                    name="Photo Resistor",
-                    value=f"{phc['value']:.4f}",
-                    timestamp=phc["ts"],
-                )
-            )
+        if self._phc:
+            r.append(SensorResponse(
+                name="Photo Resistor",
+                value=f"{self._phc['value']:.4f}",
+                timestamp=self._phc["ts"],
+            ))
 
-        rad = self._radar
-        if rad:
-            r_str = f"{rad['distance']}cm | {rad['energy']}%"
-            r.append(SensorResponse(name="Radar", value=r_str, timestamp=rad["ts"]))
+        if self._radar:
+            r.append(SensorResponse(
+                name="Radar",
+                value=f"{self._radar['distance']}cm | {self._radar['energy']}%",
+                timestamp=self._radar["ts"],
+            ))
 
         return r
 
-    def decode_command(self, command: bytes) -> Command:
-        """
-        Parse a raw wire frame back into a Command.
-        Raises ValueError for malformed frames.
-        """
-
-        command_str = command.decode().strip()
-
-        if not command_str.startswith(COMMAND_PREFIX) or not command_str.endswith(
-            COMMAND_TERMINATOR
-        ):
-            self.handle_data(command)
-
-        start = command_str.find(COMMAND_PREFIX)
-        end = command_str.find(COMMAND_TERMINATOR)
-        if start != -1 and end != -1:
-            command_str = command_str[start : end + len(COMMAND_TERMINATOR)]
-
-        body = command_str[len(COMMAND_PREFIX) : -len(COMMAND_TERMINATOR)]
-        parts = body.split(COMMAND_DELIMITER)
-
-        # No parameters supplied
-        if len(parts) == 1:
-            return Command(command=parts[0], parameters={})
-
-        command_name = parts[0]
-        parameters_str = parts[1]
-        parameters = json.loads(parameters_str)
-        return Command(command=command_name, parameters=parameters)
-
-    @staticmethod
-    def _safe_dict_eval(dict_str: str) -> dict:
-        """
-        Parse a simple stringified dict without using eval().
-        Supports only string keys and string values.
-        e.g.  "{'key': 'value', 'foo': 'bar'}"
-        """
-        out = {}
-        if not (dict_str.startswith("{") and dict_str.endswith("}")):
-            raise ValueError(f"Invalid dictionary format: {dict_str!r}")
-        dict_str = dict_str[1:-1]
-        if not dict_str.strip():
-            return out
-        for item in dict_str.split(","):
-            key, _, value = item.partition(":")
-            key = key.strip().strip("'\"")
-            value = value.strip().strip("'\"")
-            out[key] = value
-        return out
+    # ── Background reader ─────────────────────────────────────────────────────
 
     async def background_reader(self):
-        """Continuously drain the serial port and update sensor state."""
+        """
+        Sole consumer of the serial port.
+
+        Routing:
+          cmd:…:end frames  →  _cmd_queue   (picked up by _request / log_download)
+          everything else   →  handle_data()
+        """
         loop = asyncio.get_event_loop()
         while True:
             try:
-                async with self._read_lock:
-                    raw = await loop.run_in_executor(None, self.serial.readline)
+                raw = await loop.run_in_executor(None, self.serial.readline)
                 if raw:
-                    # Binary sensor frames don't start with "cmd:" — route accordingly
-                    if raw.startswith(COMMAND_PREFIX.encode()):
-                        pass  # command/response traffic, ignore here
+                    if raw.lstrip().startswith(COMMAND_PREFIX.encode()):
+                        # Route command/response frame to whoever is waiting
+                        await self._cmd_queue.put(raw)
                     else:
+                        # Binary sensor frame
                         self.handle_data(raw)
             except (ValueError, SerialException) as e:
-                # FIX 3 / FIX 1: ValueError from unpack is already descriptive;
-                # SerialException means the device went away transiently.
                 print(f"[ESPUart] reader error: {e}")
             except Exception as e:
                 print(f"[ESPUart] reader unexpected error: {e}")
             await asyncio.sleep(0)
 
-    async def async_send_command(self, cmd: Command):
-        await self.async_send(self.encode_command(cmd))
-
-    async def async_receive_command(self) -> Command:
-        """
-        Await the next complete command frame from the peer and decode it.
-        Useful on the receiving MCU side or for listening to unsolicited frames.
-        """
-        while True:
-            raw = await self.async_receive()
-            if not raw:  # empty line / keepalive – skip
-                continue
-            return self.decode_command(raw)
+    # ── Request / response ────────────────────────────────────────────────────
 
     async def _request(
         self,
@@ -364,23 +331,24 @@ class ESPUart:
         timeout: float = DEFAULT_TIMEOUT,
     ) -> dict:
         """
-        Send *cmd*, wait for one response frame, and return its parameters dict.
-        Raises asyncio.TimeoutError on timeout, ValueError on bad frame.
+        Send *cmd*, wait for the next command frame from the queue, decode it,
+        and return its parameters dict.
+        Raises asyncio.TimeoutError on timeout, ValueError on a bad frame.
         """
         await self.async_send_command(cmd)
-        raw = await asyncio.wait_for(self.async_receive(), timeout=timeout)
+        raw = await asyncio.wait_for(self._cmd_queue.get(), timeout=timeout)
         response = self.decode_command(raw)
         return response.parameters
 
     async def uart_ping(self, timeout: float = DEFAULT_TIMEOUT) -> UartPingResponse:
         """
         Two-stage UART health check:
-          1. Is the serial port open?          (software layer)
-          2. Does the peer ACK a UAK frame?    (physical/wiring layer)
+          1. Is the serial port open?       (software layer)
+          2. Does the peer ACK a UAK frame? (physical/wiring layer)
 
           'ok'          – port open AND peer responded
-          'unconnected' – port open but peer didn't respond (wrong wiring, dead device)
-          'error'       – port not open or never initialised
+          'unconnected' – port open but no response (wiring, dead device)
+          'error'       – port not open or not initialised
         """
         if self.serial is None or not self.serial.is_open:
             return UartPingResponse(status="error")
@@ -395,15 +363,12 @@ class ESPUart:
             return UartPingResponse(status="error")
         except asyncio.TimeoutError:
             return UartPingResponse(status="unconnected")
-        except ValueError, KeyError, SerialException:  # FIX 1 + FIX 2
+        except (ValueError, KeyError, SerialException):
             return UartPingResponse(status="error")
 
     async def ping(self, timeout: float = DEFAULT_TIMEOUT) -> PingResponse:
         """
-        PNG  →  PingResponse(status='ok' | 'error' | 'unconnected')
-
-        Quick liveness probe.  The remote MCU should reply with a frame whose
-        parameters contain  {'status': 'ok'}  on success.
+        PNG → PingResponse(status='ok' | 'error' | 'unconnected')
         """
         try:
             params = await self._request(
@@ -413,15 +378,11 @@ class ESPUart:
             return PingResponse(status=params.get("status", "error"))
         except asyncio.TimeoutError:
             return PingResponse(status="unconnected")
-        except ValueError, KeyError, SerialException:  # FIX 1 + FIX 2
+        except (ValueError, KeyError, SerialException):
             return PingResponse(status="error")
 
     async def log_info(self, timeout: float = DEFAULT_TIMEOUT) -> LogInfoResponse:
-        """
-        LGI  →  LogInfoResponse
-
-        Returns log metadata: id, source and coverage string.
-        """
+        """LGI → LogInfoResponse"""
         params = await self._request(
             Command(command=CMD_LOG_INFO, parameters={}),
             timeout=timeout,
@@ -434,11 +395,10 @@ class ESPUart:
         timeout: float = DEFAULT_TIMEOUT,
     ) -> list[LogInfoResponse]:
         """
-        LGD  →  list[LogInfoResponse]
+        LGD → list[LogInfoResponse]
 
-        Streams the full log for *log_id* from the ESPNOW-MCU.
-        Each newline-terminated frame is decoded and collected until the peer
-        sends an empty/terminator frame (no 'id' key in parameters).
+        Reads frames from _cmd_queue until a terminator (frame with no 'id' key)
+        or until the timeout elapses with no new frame.
         """
         await self.async_send_command(
             Command(command=CMD_LOG_DOWNLOAD, parameters={"id": str(log_id)})
@@ -447,12 +407,12 @@ class ESPUart:
         entries: list[LogInfoResponse] = []
         while True:
             try:
-                raw = await asyncio.wait_for(self.async_receive(), timeout=timeout)
+                raw = await asyncio.wait_for(self._cmd_queue.get(), timeout=timeout)
             except asyncio.TimeoutError:
-                break  # no more frames within the window – treat as end of stream
+                break
 
             if not raw:
-                break  # empty frame signals end of transmission
+                break
 
             cmd = self.decode_command(raw)
             if "id" not in cmd.parameters:
@@ -461,3 +421,25 @@ class ESPUart:
             entries.append(LogInfoResponse(**cmd.parameters))
 
         return entries
+
+    # ── Utility ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _safe_dict_eval(dict_str: str) -> dict:
+        """
+        Parse a simple stringified dict without using eval().
+        Supports only string keys and string values.
+        e.g. "{'key': 'value', 'foo': 'bar'}"
+        """
+        out = {}
+        if not (dict_str.startswith("{") and dict_str.endswith("}")):
+            raise ValueError(f"Invalid dictionary format: {dict_str!r}")
+        dict_str = dict_str[1:-1]
+        if not dict_str.strip():
+            return out
+        for item in dict_str.split(","):
+            key, _, value = item.partition(":")
+            key = key.strip().strip("'\"")
+            value = value.strip().strip("'\"")
+            out[key] = value
+        return out
