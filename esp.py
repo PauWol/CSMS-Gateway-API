@@ -45,13 +45,13 @@ _MIN_HEADER = 6
 
 # Bytes consumed after the header for each flag
 _FLAG_SIZES = {
-    FLAG_PIR: 3,    # B + H
-    FLAG_PHC: 4,    # H + H
+    FLAG_PIR: 3,  # B + H
+    FLAG_PHC: 4,  # H + H
     FLAG_RADAR: 6,  # H + H + H
-    FLAG_THREAT: 9, # f + f + B
+    FLAG_THREAT: 9,  # f + f + B
     FLAG_SLEEP: 4,  # L
-    FLAG_VOLT: 4,   # H + H
-    FLAG_TTE: 4,    # L
+    FLAG_VOLT: 4,  # H + H
+    FLAG_TTE: 4,  # L
 }
 
 
@@ -274,25 +274,31 @@ class ESPUart:
         r = []
 
         if self._pir:
-            r.append(SensorResponse(
-                name="Pir Motion",
-                value=str(self._pir["value"]),
-                timestamp=self._pir["ts"],
-            ))
+            r.append(
+                SensorResponse(
+                    name="Pir Motion",
+                    value=str(self._pir["value"]),
+                    timestamp=self._pir["ts"],
+                )
+            )
 
         if self._phc:
-            r.append(SensorResponse(
-                name="Photo Resistor",
-                value=f"{self._phc['value']:.4f}",
-                timestamp=self._phc["ts"],
-            ))
+            r.append(
+                SensorResponse(
+                    name="Photo Resistor",
+                    value=f"{self._phc['value']:.4f}",
+                    timestamp=self._phc["ts"],
+                )
+            )
 
         if self._radar:
-            r.append(SensorResponse(
-                name="Radar",
-                value=f"{self._radar['distance']}cm | {self._radar['energy']}%",
-                timestamp=self._radar["ts"],
-            ))
+            r.append(
+                SensorResponse(
+                    name="Radar",
+                    value=f"{self._radar['distance']}cm | {self._radar['energy']}%",
+                    timestamp=self._radar["ts"],
+                )
+            )
 
         return r
 
@@ -363,7 +369,7 @@ class ESPUart:
             return UartPingResponse(status="error")
         except asyncio.TimeoutError:
             return UartPingResponse(status="unconnected")
-        except (ValueError, KeyError, SerialException):
+        except ValueError, KeyError, SerialException:
             return UartPingResponse(status="error")
 
     async def ping(self, timeout: float = DEFAULT_TIMEOUT) -> PingResponse:
@@ -378,7 +384,7 @@ class ESPUart:
             return PingResponse(status=params.get("status", "error"))
         except asyncio.TimeoutError:
             return PingResponse(status="unconnected")
-        except (ValueError, KeyError, SerialException):
+        except ValueError, KeyError, SerialException:
             return PingResponse(status="error")
 
     async def log_info(self, timeout: float = DEFAULT_TIMEOUT) -> LogInfoResponse:
