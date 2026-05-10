@@ -28,7 +28,7 @@ CMD_LOG_DOWNLOAD = "LGD"  # Stream full log over UART
 
 DEFAULT_TIMEOUT = 5.0
 
-# ── Protocol flags (must match sender) ───────────────────────────────────────
+# Protocol flags (must match sender)
 FLAG_PIR = 0x01
 FLAG_PHC = 0x02
 FLAG_RADAR = 0x04
@@ -124,8 +124,6 @@ class ESPUart:
     """
     Async-capable UART wrapper for ESP32 peer-to-peer communication.
 
-    Architecture
-    ────────────
     background_reader() is the *sole* consumer of the serial port. Every
     incoming byte flows through it:
 
@@ -174,7 +172,7 @@ class ESPUart:
         if self.serial and self.serial.is_open:
             self.serial.close()
 
-    # ── Encoding ──────────────────────────────────────────────────────────────
+    # Encoding
 
     @staticmethod
     def encode_command(cmd: Command) -> str:
@@ -211,7 +209,7 @@ class ESPUart:
         parameters = json.loads(parts[1])
         return Command(command=command_name, parameters=parameters)
 
-    # ── I/O helpers ───────────────────────────────────────────────────────────
+    # I/O helpers
 
     def _sync_send(self, data: str):
         self.serial.write(data.encode())
@@ -224,7 +222,7 @@ class ESPUart:
     async def async_send_command(self, cmd: Command):
         await self.async_send(self.encode_command(cmd))
 
-    # ── Sensor state ──────────────────────────────────────────────────────────
+    # Sensor state
 
     def handle_data(self, data: bytearray | bytes):
         """Unpack a binary sensor frame and update in-memory state."""
@@ -302,7 +300,7 @@ class ESPUart:
 
         return r
 
-    # ── Background reader ─────────────────────────────────────────────────────
+    # Background reader
 
     async def background_reader(self):
         """
@@ -329,7 +327,7 @@ class ESPUart:
                 print(f"[ESPUart] reader unexpected error: {e}")
             await asyncio.sleep(0)
 
-    # ── Request / response ────────────────────────────────────────────────────
+    # Request / response
 
     async def _request(
         self,
@@ -428,7 +426,7 @@ class ESPUart:
 
         return entries
 
-    # ── Utility ───────────────────────────────────────────────────────────────
+    # Utility
 
     @staticmethod
     def _safe_dict_eval(dict_str: str) -> dict:
